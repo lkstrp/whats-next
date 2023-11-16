@@ -1,6 +1,7 @@
 import os
 import re
 import random
+import datetime as dt
 
 import requests
 from bs4 import BeautifulSoup
@@ -37,7 +38,7 @@ def scrape_and_save_user_diary(user_url):
 
     if os.path.exists(f'data/diary/{user}.csv'):
         log.info(f'User already scraped: {user}.')
-        return
+        return 'already_scraped'
 
     page = 1
     df = pd.DataFrame(columns=['date', 'movie', 'rating'])
@@ -49,7 +50,7 @@ def scrape_and_save_user_diary(user_url):
             rows = table.find_all('tr')
         except AttributeError:
             log.info(f'User has no diaries: {user}.')
-            return
+            return 'no_diaries'
         if not rows[1:]:
             break
         month = None
@@ -80,14 +81,31 @@ def scrape_and_save_user_diary(user_url):
     df.to_csv(f'data/diary/{user}.csv', index=False)
 
     log.info(f'{total_scraped+1}: Scraped {len(df)} diaries for user {user}.')
-    return
+    return 'scraped'
 
 if __name__ == '__main__':
+    stats = {'scraped': 0, 'no_diaries': 0, 'already_scraped': 0}
+    start_time = dt.datetime.now()
     while True:
         try:
-            scrape_and_save_user_diary(get_random_user_url())
+            call = scrape_and_save_user_diary(get_random_user_url())
+            stats[call] += 1
+            stats_percentage = {k: v/sum(stats.values()) for k, v in stats.items()}
+            if sum(stats.values()) % 10 == 0:
+                time_per_hit = (dt.datetime.now() - start_time) / stats['scraped']
+                num_scraped = len(os.listdir('data/diary'))
 
-        except requests.exceptions.ConnectionError:
-            import time
-            log.warning('Connection error. Waiting 60 seconds.')
-            time.sleep(60)
+                est_finish_100k = dt.datetime.now() + time_per_hit * (100000 - num_scraped)
+                est_finish_500k = dt.datetime.now() + time_per_hit * (500000 - num_scraped)
+                est_finish_1m = dt.datetime.now() + time_per_hit * (1000000 - num_scraped)
+
+                log.info(f'Scraped: {stats_percentage["scraped"]:.2%}, '
+                         f'No diaries: {stats_percentage["no_diaries"]:.2%}, '
+                         f'Already scraped: {stats_percentage["already_scraped"]:.2%}.')
+                log.info(f'Est. finish 100k: {est_finish.strftime("%H:%M:%S")} at {est_finish.strftime("%d.%m")}.')
+                log.info(f'Est. finish 500k: {est_finish.strftime("%H:%M:%S")} at {est_finish.strftime("%d.%m")}.')
+                log.info(f'Est. finish 1m  : {est_finish.strftime("%H:%M:%S")} at {est_finish.strftime("%d.%m")}.')
+
+        except Exception as e:
+            log.error(f'Error: {e}')
+            continue
