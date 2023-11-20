@@ -19,10 +19,8 @@ def get_random_movie_url():
     return 'https://letterboxd.com' + random.choice(matched_urls)
 
 def get_random_user_url():
-    # Get random number between 1 and 100
-
     while True:
-        random_page = random.randint(1, 100)
+        random_page = random.randint(1, 250)
         movie_url = get_random_movie_url() + 'members/page/' + str(random_page)
         soup = BeautifulSoup(requests.get(movie_url).content, 'html.parser')
         users = soup.findAll('td', class_='table-person')
@@ -46,11 +44,12 @@ def scrape_and_save_user_diary(user_url):
         soup = BeautifulSoup(requests.get(f'{diary_url}page/{page}').content, 'html.parser')
         # Find the table by ID
         table = soup.find('table', {'id': 'diary-table'})
+        # Check if user has any diary entries
         try:
             rows = table.find_all('tr')
         except AttributeError:
-            log.info(f'User has no diaries: {user}.')
-            return 'no_diaries'
+            break
+
         if not rows[1:]:
             break
         month = None
@@ -84,7 +83,7 @@ def scrape_and_save_user_diary(user_url):
     return 'scraped'
 
 if __name__ == '__main__':
-    stats = {'scraped': 0, 'no_diaries': 0, 'already_scraped': 0}
+    stats = {'scraped': 0, 'already_scraped': 0}
     start_time = dt.datetime.now()
     while True:
         try:
@@ -100,11 +99,10 @@ if __name__ == '__main__':
                 est_finish_1m = dt.datetime.now() + time_per_hit * (1000000 - num_scraped)
 
                 log.info(f'Scraped: {stats_percentage["scraped"]:.2%}, '
-                         f'No diaries: {stats_percentage["no_diaries"]:.2%}, '
                          f'Already scraped: {stats_percentage["already_scraped"]:.2%}.')
-                log.info(f'Est. finish 100k: {est_finish.strftime("%H:%M:%S")} at {est_finish.strftime("%d.%m")}.')
-                log.info(f'Est. finish 500k: {est_finish.strftime("%H:%M:%S")} at {est_finish.strftime("%d.%m")}.')
-                log.info(f'Est. finish 1m  : {est_finish.strftime("%H:%M:%S")} at {est_finish.strftime("%d.%m")}.')
+                log.info(f'Est. finish 100k: {est_finish_100k.strftime("%d.%m.%Y at %H:%M:%S")}.')
+                log.info(f'Est. finish 500k: {est_finish_500k.strftime("%d.%m.%Y at %H:%M:%S")}.')
+                log.info(f'Est. finish 1m  : {est_finish_1m.strftime("%d.%m.%Y at %H:%M:%S")}.')
 
         except Exception as e:
             log.error(f'Error: {e}')
