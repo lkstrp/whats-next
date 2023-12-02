@@ -2,6 +2,7 @@ import os
 import re
 import random
 import datetime as dt
+import sqlite3
 
 import requests
 from bs4 import BeautifulSoup
@@ -11,12 +12,14 @@ from utils.logger import Logger
 
 log = Logger('whats-next-dev')
 
+
 def get_random_movie_url():
     url = 'https://letterboxd.com/'
     soup = BeautifulSoup(requests.get(url).content, 'html.parser')
     pattern = r'(\/film\/[^\/]+\/)'
     matched_urls = re.findall(pattern, str(soup))
     return 'https://letterboxd.com' + random.choice(matched_urls)
+
 
 def get_random_user_url():
     while True:
@@ -29,17 +32,13 @@ def get_random_user_url():
     user = random.choice(users).find('h3').find('a')['href']
     return 'https://letterboxd.com' + user
 
-def scrape_and_save_user_diary(user_url):
 
+def scrape_user_diary(user_url):
     diary_url = user_url + 'films/diary/'
     user = user_url.split('/')[-2]
 
-    if os.path.exists(f'data/diary/{user}.csv'):
-        log.info(f'User already scraped: {user}.')
-        return 'already_scraped'
-
     page = 1
-    df = pd.DataFrame(columns=['date', 'movie', 'rating'])
+    df = pd.DataFrame(columns=['date', 'movie_url', 'rating'])
     while True:
         soup = BeautifulSoup(requests.get(f'{diary_url}page/{page}').content, 'html.parser')
         # Find the table by ID
@@ -53,8 +52,8 @@ def scrape_and_save_user_diary(user_url):
         if not rows[1:]:
             break
         month = None
-        for row in rows[1:]:
-            cols = row.find_all('td')
+        for row_ in rows[1:]:
+            cols = row_.find_all('td')
             # Get date
             if cols[0].text.strip() != '':
                 month = cols[0].text
@@ -73,25 +72,71 @@ def scrape_and_save_user_diary(user_url):
                 raise Exception('Multiple numbers found in rating.')
 
             # Append to DataFrame
-            df = pd.concat([df, pd.DataFrame([[date, url, rating]], columns=['date', 'movie', 'rating'])])
+            df = pd.concat([df, pd.DataFrame([[date, url, rating]], columns=['date', 'movie_url', 'rating'])])
 
         page += 1
-    total_scraped = len(os.listdir('data/diary'))
-    df.to_csv(f'data/diary/{user}.csv', index=False)
+    return df
 
-    log.info(f'{total_scraped+1}: Scraped {len(df)} diaries for user {user}.')
-    return 'scraped'
 
 if __name__ == '__main__':
-    stats = {'scraped': 0, 'already_scraped': 0}
+
+    con = sqlite3.connect("/Users/lukas/lt_data/Code/python/whats-next-dev/letterboxd-diaries.sqlite")
+    cur = con.cursor()
+
+    stats = {'new': 0, 'old': 0}
     start_time = dt.datetime.now()
     while True:
         try:
-            call = scrape_and_save_user_diary(get_random_user_url())
-            stats[call] += 1
+            random_user = get_random_user_url()
+            user_exists = cur.execute("SELECT 1 FROM user WHERE username = ?", (random_user,)).fetchone()
+            if user_exists:
+                stats['old'] += 1
+                log.info(f'User already scraped: {user}.')
+                continue
+            # Get data
+            diary_df = scrape_user_diary(random_user)
+
+            # Add to user database
+            username = random_user.split('/')[-2]
+            num_diaries = len(diary_df)
+            num_diaries_rated = len(diary_df[diary_df['rating'].notnull()])
+            timestamp = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            sql_query = """
+            INSERT INTO user (username, num_diaries, num_diaries_rated, timestamp)
+            SELECT ?, ?, ?, ?
+            WHERE NOT EXISTS (SELECT 1 FROM user WHERE username = ?);
+            """
+            cur.execute(sql_query, (username, num_diaries, num_diaries_rated, timestamp, username))
+
+            # Add to movie database
+            for movie in diary_df['movie_url'].unique():
+                sql_query = """
+                INSERT INTO movie (url_movie)
+                SELECT ?
+                WHERE NOT EXISTS (SELECT 1 FROM movie WHERE url_movie = ?);
+                """
+                cur.execute(sql_query, (movie, movie))
+
+            # Add to diary database
+            for index, row in diary_df.iterrows():
+
+                # Use a single SQL query to insert into "diary" with a JOIN to fetch foreign keys
+                sql_query = """
+                INSERT INTO diary (user_id, movie_id, date, rating)
+                SELECT u.id, m.id, ?, ?
+                FROM user u
+                JOIN movie m ON m.url_movie = ?
+                WHERE u.username = ?;
+                """
+                cur.execute(sql_query, (row.date, row.rating, row.movie_url, username))
+
+            log.info(f'Scraped {len(diary_df)} diaries for user {username}.')
+
+            # Print stats
+            stats['new'] += 1
             stats_percentage = {k: v/sum(stats.values()) for k, v in stats.items()}
             if sum(stats.values()) % 10 == 0:
-                time_per_hit = (dt.datetime.now() - start_time) / stats['scraped']
+                time_per_hit = (dt.datetime.now() - start_time) / stats['new']
                 num_scraped = len(os.listdir('data/diary'))
 
                 est_finish_100k = dt.datetime.now() + time_per_hit * (100000 - num_scraped)
@@ -103,6 +148,10 @@ if __name__ == '__main__':
                 log.info(f'Est. finish 100k: {est_finish_100k.strftime("%d.%m.%Y at %H:%M:%S")}.')
                 log.info(f'Est. finish 500k: {est_finish_500k.strftime("%d.%m.%Y at %H:%M:%S")}.')
                 log.info(f'Est. finish 1m  : {est_finish_1m.strftime("%d.%m.%Y at %H:%M:%S")}.')
+
+            # Commit changes
+            if sum(stats.values()) % 1 == 0:
+                con.commit()
 
         except Exception as e:
             log.error(f'Error: {e}')
