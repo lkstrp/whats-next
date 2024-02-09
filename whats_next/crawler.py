@@ -25,6 +25,7 @@ def extract_rating(cols: list[BeautifulSoup]) -> int or None:
     Returns:
     -------
         int or None: The extracted rating as an integer, or None if no rating is found.
+
     """
     rating = cols[4].find('span')
     pattern = r'(\d{1,2})'
@@ -88,6 +89,7 @@ def get_random_user_url() -> str:
     Returns
     -------
         str: Full url to the profile of a random user.
+
     """
     while True:
         random_page = random.randint(1, 250)
@@ -110,6 +112,7 @@ def scrape_user_diary(user_url: str) -> pd.DataFrame:
     Returns:
     -------
         pd.DataFrame: The scraped data as a pandas DataFrame, with columns 'date', 'movie_url', and 'rating'.
+
     """
     diary_url = user_url + 'films/diary/'
     user = user_url.split('/')[-2]
